@@ -5,38 +5,40 @@ const cliProgress = require('cli-progress');
 
 // Configuration object
 const config = {
-  headless: false, // Set to true for headless mode
-  csvFilePath: './ALL_JTL_SINGLE.csv', // Path to your CSV file
-  websiteUrl: 'https://www.ecoinform.de/', // URL to scrape
+  headless: true, // Set to false to observe the browser in action
+  csvFilePath: './ALL_JTL_SINGLE.csv', // Path to your input CSV file
+  websiteUrl: 'https://www.ecoinform.de/', // Website URL to scrape
   selectors: {
     searchBox: '#suche',
     resultContainer: '.produkt',
     noResultsMessage: 'div.message',
   },
-  noResultsText: 'leider konnten wir zu Ihrer Suchanfrage', // Partial text to check in the no-results message
-  logFile: './log.txt', // Log file path
-  delayTime: 5000,
-  outputCsvPath: './output.csv' // Path to the output CSV file
+  noResultsText: 'leider konnten wir zu Ihrer Suchanfrage', // Partial text for "no results"
+  logFile: './log.txt', // Path to the log file
+  delayTime: 5000, // Time to wait for the page to load (in ms)
+  outputCsvPath: './output.csv', // Path to save the output CSV
 };
+
 // Utility function to delay execution
 const delay = (time) => new Promise(resolve => setTimeout(resolve, time));
-// Function to initialize the log file
+
+// Initialize the log file
 function initializeLogFile() {
-  fs.writeFileSync(config.logFile, ''); // Clear the file
+  fs.writeFileSync(config.logFile, ''); // Clear the file at the start
 }
 
-// Function to write to the log file and console
+// Log messages to file and console
 function logMessage(message) {
   console.log(message);
   fs.appendFileSync(config.logFile, message + '\n');
 }
 
-// Function to read GTINs from the CSV file
+// Read GTINs from the input CSV file
 function readGTINsFromCSV(filePath) {
   return new Promise((resolve, reject) => {
     const gtins = [];
     fs.createReadStream(filePath)
-      .pipe(csv({ separator: ';' }))
+      .pipe(csv({ separator: ';' })) // Adjust separator if necessary
       .on('data', (row) => {
         if (row.GTIN) {
           gtins.push(row.GTIN.trim());
@@ -47,97 +49,126 @@ function readGTINsFromCSV(filePath) {
   });
 }
 
-// Function to scrape EcoInform for a single GTIN
+// Write GTIN and PDF URL to the output CSV
+function writeToCSV(gtin, pdfUrl, sicherheitsdatenblattUrl) {
+  const csvRow = `${gtin},${pdfUrl},${sicherheitsdatenblattUrl}\n`;
+  if (!fs.existsSync(config.outputCsvPath)) {
+    fs.writeFileSync(config.outputCsvPath, 'GTIN,PDF_URL,Sicherheitsdatenblatt\n'); // Write header if file doesn't exist
+  }
+  fs.appendFileSync(config.outputCsvPath, csvRow);
+}
+
+// Scrape EcoInform for a single GTIN
 async function scrapeEcoInform(gtin) {
   const browser = await puppeteer.launch({ headless: config.headless });
   const page = await browser.newPage();
 
   try {
     await page.goto(config.websiteUrl, { waitUntil: 'networkidle2' });
+    logMessage(`Navigated to ${config.websiteUrl}`);
 
-    // Wait for the search box to load
+    // Wait for the search box and enter the GTIN
     await page.waitForSelector(config.selectors.searchBox, { timeout: 60000 });
-
-    // Type the search query and submit the form
     await page.type(config.selectors.searchBox, gtin);
     await page.keyboard.press('Enter');
+    logMessage(`Entered GTIN: ${gtin}`);
 
-    // Wait for the search results or "no results" message
+    // Wait for the result or no result message
     await page.waitForSelector(`${config.selectors.resultContainer}, ${config.selectors.noResultsMessage}`, { timeout: 60000 });
     await delay(config.delayTime);
 
-    // Check for the "no results" message and verify its content
+    // Check for the "no results" message
     const noResults = await page.$(config.selectors.noResultsMessage);
     if (noResults) {
       const messageContent = await page.$eval(config.selectors.noResultsMessage, (el) => el.innerText.trim());
       if (messageContent.includes(config.noResultsText)) {
-        logMessage(`GTIN: ${gtin} - No product found on EcoInform.`);
-        return; // Skip further processing for this GTIN
+        logMessage(`GTIN: ${gtin} - No product found.`);
+        writeToCSV(gtin, '', ''); // Add blank entries for missing data
+        return;
       }
     }
 
-    logMessage(`GTIN: ${gtin} - Product found on EcoInform.`);
+    logMessage(`GTIN: ${gtin} - Product found.`);
 
-    // Scroll to the "pdf-Datenblatt" link element
-    const pdfLinkSelector = 'a.link[href*="pdf-Datenblatt"]';
-    let pdfLink = await page.$(pdfLinkSelector);
+    // Locate the specific parent div
+    const parentDivSelector = 'div.content.detail.inner_wrap.view_1';
+    const parentDiv = await page.$(parentDivSelector);
 
-    if (pdfLink) {
-      await pdfLink.scrollIntoView({ behavior: 'smooth' });
-      logMessage(`GTIN: ${gtin} - Scrolled to PDF download link.`);
-      
-      const pdfUrl = await page.$eval(pdfLinkSelector, (link) => link.href);
-      logMessage(`GTIN: ${gtin} - PDF download link found: ${pdfUrl}`);
-      
-      // Write PDF URL to CSV
-      writeToCSV(gtin, pdfUrl);
-    } else {
-      logMessage(`GTIN: ${gtin} - PDF download link not found.`);
+    if (!parentDiv) {
+      logMessage(`GTIN: ${gtin} - Parent <div> not found.`);
+      writeToCSV(gtin, '', ''); // Add blank entries for missing data
+      return;
     }
 
-  } catch (err) {
-    logMessage(`Error processing GTIN ${gtin}: ${err}`);
+    // Extract PDF URL
+    let pdfUrl = '';
+    const pdfLink = await parentDiv.$$eval(
+      'a.link.active[target="_blank"]',
+      links => links.find(link => link.innerText.includes('pdf-Datenblatt'))?.href
+    ).catch(() => '');
+
+    if (pdfLink) {
+      pdfUrl = pdfLink;
+      logMessage(`GTIN: ${gtin} - pdf link found: ${pdfUrl}`);
+    } else {
+      logMessage(`GTIN: ${gtin} - pdf link not found.`);
+    }
+
+    // Extract Sicherheitsdatenblatt URL if the text matches 'pdf-Datenblatt'
+    let sicherheitsdatenblattUrl = '';
+    const sicherheitsdatenblattLink = await parentDiv.$$eval(
+      'a[target="_blank"]',
+      links => links.find(link => link.innerText.includes('Sicherheitsdatenblatt'))?.href
+    ).catch(() => '');
+
+    if (sicherheitsdatenblattLink) {
+      sicherheitsdatenblattUrl = sicherheitsdatenblattLink;
+      logMessage(`GTIN: ${gtin} - Sicherheitsdatenblatt link found: ${sicherheitsdatenblattUrl}`);
+    } else {
+      logMessage(`GTIN: ${gtin} - Sicherheitsdatenblatt link not found.`);
+    }
+
+    // Write data to CSV
+    writeToCSV(gtin, pdfUrl, sicherheitsdatenblattUrl);
+  } catch (error) {
+    logMessage(`Error processing GTIN ${gtin}: ${error.message}`);
+    writeToCSV(gtin, '', ''); // Add blank entries for errors
   } finally {
     await browser.close();
   }
 }
 
-// Function to write to CSV
-function writeToCSV(gtin, pdfUrl) {
-  const csvRow = `${gtin},${metaTitle},${inverkehrbringer},${pdfUrl}\n`;
-  fs.appendFileSync(config.outputCsvPath, csvRow);
-}
-
 // Main function to process all GTINs
 async function processGTINs() {
   try {
-    // Delete existing output.csv file before starting
+    // Remove the output CSV if it exists
     if (fs.existsSync(config.outputCsvPath)) {
       fs.unlinkSync(config.outputCsvPath);
     }
 
+    // Read GTINs from the input CSV
     const gtins = await readGTINsFromCSV(config.csvFilePath);
 
-    // Initialize progress bar
+    // Initialize a progress bar
     const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
     progressBar.start(gtins.length, 0);
 
     for (let i = 0; i < gtins.length; i++) {
       const gtin = gtins[i];
-      logMessage(`\nProcessing GTIN: ${gtin}`);
+      logMessage(`Processing GTIN: ${gtin}`);
       await scrapeEcoInform(gtin);
-    
-      // Update progress bar
+
+      // Update the progress bar
       progressBar.update(i + 1);
     }
 
     progressBar.stop();
-    logMessage('Processing complete.');
-  } catch (err) {
-    logMessage(`Error: ${err}`);
+    logMessage('All GTINs processed successfully.');
+  } catch (error) {
+    logMessage(`Error: ${error.message}`);
   }
 }
 
-// Initialize log file and run the script
+// Start the script
 initializeLogFile();
 processGTINs();
