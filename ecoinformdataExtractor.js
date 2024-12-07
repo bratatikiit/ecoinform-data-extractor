@@ -11,14 +11,15 @@ const config = {
   selectors: {
     searchBox: '#suche',
     resultContainer: '.produkt',
-    metaTitle: 'meta[name="title"]',
-    inverkehrbringer: 'div.dval div.div_tval.mid_1188 b.tv_name',
     noResultsMessage: 'div.message',
   },
   noResultsText: 'leider konnten wir zu Ihrer Suchanfrage', // Partial text to check in the no-results message
   logFile: './log.txt', // Log file path
+  delayTime: 5000,
+  outputCsvPath: './output.csv' // Path to the output CSV file
 };
-
+// Utility function to delay execution
+const delay = (time) => new Promise(resolve => setTimeout(resolve, time));
 // Function to initialize the log file
 function initializeLogFile() {
   fs.writeFileSync(config.logFile, ''); // Clear the file
@@ -63,6 +64,7 @@ async function scrapeEcoInform(gtin) {
 
     // Wait for the search results or "no results" message
     await page.waitForSelector(`${config.selectors.resultContainer}, ${config.selectors.noResultsMessage}`, { timeout: 60000 });
+    await delay(config.delayTime);
 
     // Check for the "no results" message and verify its content
     const noResults = await page.$(config.selectors.noResultsMessage);
@@ -74,21 +76,25 @@ async function scrapeEcoInform(gtin) {
       }
     }
 
-    // Extract the content of the <meta name="title"> tag
-    const metaTitle = await page.$eval(config.selectors.metaTitle, (meta) =>
-      meta.getAttribute('content')
-    );
+    logMessage(`GTIN: ${gtin} - Product found on EcoInform.`);
 
-    // Extract the "Inverkehrbringer" field
-    const inverkehrbringer = await page.$eval(
-      config.selectors.inverkehrbringer,
-      (element) => element.nextElementSibling.textContent.trim()
-    );
+    // Scroll to the "pdf-Datenblatt" link element
+    const pdfLinkSelector = 'a.link[href*="pdf-Datenblatt"]';
+    let pdfLink = await page.$(pdfLinkSelector);
 
-    // Log results
-    logMessage(`GTIN: ${gtin}`);
-    logMessage(`Meta Title Content: ${metaTitle}`);
-    logMessage(`Inverkehrbringer: ${inverkehrbringer}`);
+    if (pdfLink) {
+      await pdfLink.scrollIntoView({ behavior: 'smooth' });
+      logMessage(`GTIN: ${gtin} - Scrolled to PDF download link.`);
+      
+      const pdfUrl = await page.$eval(pdfLinkSelector, (link) => link.href);
+      logMessage(`GTIN: ${gtin} - PDF download link found: ${pdfUrl}`);
+      
+      // Write PDF URL to CSV
+      writeToCSV(gtin, pdfUrl);
+    } else {
+      logMessage(`GTIN: ${gtin} - PDF download link not found.`);
+    }
+
   } catch (err) {
     logMessage(`Error processing GTIN ${gtin}: ${err}`);
   } finally {
@@ -96,9 +102,20 @@ async function scrapeEcoInform(gtin) {
   }
 }
 
+// Function to write to CSV
+function writeToCSV(gtin, pdfUrl) {
+  const csvRow = `${gtin},${metaTitle},${inverkehrbringer},${pdfUrl}\n`;
+  fs.appendFileSync(config.outputCsvPath, csvRow);
+}
+
 // Main function to process all GTINs
 async function processGTINs() {
   try {
+    // Delete existing output.csv file before starting
+    if (fs.existsSync(config.outputCsvPath)) {
+      fs.unlinkSync(config.outputCsvPath);
+    }
+
     const gtins = await readGTINsFromCSV(config.csvFilePath);
 
     // Initialize progress bar
