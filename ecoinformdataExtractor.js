@@ -49,12 +49,19 @@ function readGTINsFromCSV(filePath) {
   });
 }
 
-// Write GTIN and PDF URL to the output CSV
+// Write GTIN and PDF URL to the output CSV only if PDF_URL is not empty
 function writeToCSV(gtin, pdfUrl, sicherheitsdatenblattUrl) {
-  const csvRow = `${gtin},${pdfUrl},${sicherheitsdatenblattUrl}\n`;
-  if (!fs.existsSync(config.outputCsvPath)) {
-    fs.writeFileSync(config.outputCsvPath, 'GTIN,PDF_URL,Sicherheitsdatenblatt\n'); // Write header if file doesn't exist
+  if (!pdfUrl) {
+    return; // Skip writing to CSV if PDF_URL is empty
   }
+
+  const csvRow = `${gtin},${pdfUrl},${sicherheitsdatenblattUrl}\n`;
+
+  // Write header if file doesn't exist
+  if (!fs.existsSync(config.outputCsvPath)) {
+    fs.writeFileSync(config.outputCsvPath, 'GTIN,PDF_URL,Sicherheitsdatenblatt\n');
+  }
+
   fs.appendFileSync(config.outputCsvPath, csvRow);
 }
 
