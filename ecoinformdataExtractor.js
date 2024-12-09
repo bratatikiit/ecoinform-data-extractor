@@ -5,7 +5,7 @@ const cliProgress = require('cli-progress');
 
 // Configuration object
 const config = {
-  headless: false, // Set to false to observe the browser in action
+  headless: true, // Set to false to observe the browser in action
   csvFilePath: './checked_gtins.csv', // Path to your updated input CSV file
   websiteUrl: 'https://www.ecoinform.de/', // Website URL to scrape
   selectors: {
