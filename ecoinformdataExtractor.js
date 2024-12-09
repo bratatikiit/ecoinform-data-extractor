@@ -5,8 +5,8 @@ const cliProgress = require('cli-progress');
 
 // Configuration object
 const config = {
-  headless: true, // Set to false to observe the browser in action
-  csvFilePath: './ALL_JTL_SINGLE.csv', // Path to your input CSV file
+  headless: false, // Set to false to observe the browser in action
+  csvFilePath: './checked_gtins.csv', // Path to your updated input CSV file
   websiteUrl: 'https://www.ecoinform.de/', // Website URL to scrape
   selectors: {
     searchBox: '#suche',
@@ -38,9 +38,9 @@ function readGTINsFromCSV(filePath) {
   return new Promise((resolve, reject) => {
     const gtins = [];
     fs.createReadStream(filePath)
-      .pipe(csv({ separator: ';' })) // Adjust separator if necessary
+      .pipe(csv({ separator: ',' })) // Adjust separator if necessary
       .on('data', (row) => {
-        if (row.GTIN) {
+        if (row.GTIN && row.Quelle === 'ecoinform') {
           gtins.push(row.GTIN.trim());
         }
       })
