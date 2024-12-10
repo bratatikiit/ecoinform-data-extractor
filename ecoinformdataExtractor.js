@@ -81,7 +81,7 @@ async function scrapeEcoInform(gtin) {
     logMessage(`Entered GTIN: ${gtin}`);
 
     // Wait for the result or no result message
-    await page.waitForSelector(`${config.selectors.resultContainer}, ${config.selectors.noResultsMessage}`, { timeout: 60000 });
+    await page.waitForSelector(`${config.selectors.resultContainer}, ${config.selectors.noResultsMessage}`, { timeout: 6000 });
     await delay(config.delayTime);
 
     // Check for the "no results" message
