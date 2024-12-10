@@ -59,7 +59,7 @@ function writeToCSV(gtin, pdfUrl, sicherheitsdatenblattUrl) {
 
   // Write header if file doesn't exist
   if (!fs.existsSync(config.outputCsvPath)) {
-    fs.writeFileSync(config.outputCsvPath, 'GTIN,PDF_URL,Sicherheitsdatenblatt\n');
+    fs.writeFileSync(config.outputCsvPath, 'GTIN,type,pdflink\n');
   }
 
   fs.appendFileSync(config.outputCsvPath, csvRow);
@@ -117,6 +117,7 @@ async function scrapeEcoInform(gtin) {
     if (pdfLink) {
       pdfUrl = pdfLink;
       logMessage(`GTIN: ${gtin} - pdf link found: ${pdfUrl}`);
+      writeToCSV(gtin, "Anbieter-Informationsübersicht",pdfUrl);
     } else {
       logMessage(`GTIN: ${gtin} - pdf link not found.`);
     }
@@ -131,12 +132,13 @@ async function scrapeEcoInform(gtin) {
     if (sicherheitsdatenblattLink) {
       sicherheitsdatenblattUrl = sicherheitsdatenblattLink;
       logMessage(`GTIN: ${gtin} - Sicherheitsdatenblatt link found: ${sicherheitsdatenblattUrl}`);
+      // Write data to CSV
+      writeToCSV(gtin, "Sicherheitsdatenblatt",sicherheitsdatenblattUrl);
     } else {
       logMessage(`GTIN: ${gtin} - Sicherheitsdatenblatt link not found.`);
     }
 
-    // Write data to CSV
-    writeToCSV(gtin, pdfUrl, sicherheitsdatenblattUrl);
+
   } catch (error) {
     logMessage(`Error processing GTIN ${gtin}: ${error.message}`);
     writeToCSV(gtin, '', ''); // Add blank entries for errors
